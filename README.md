@@ -6,9 +6,7 @@ Anime Vault 是一个面向个人使用的本地番剧管理与观看网页。�
 
 Anime Vault 项目提供了与 Animeko 配合使用的订阅配置和 Selector 数据源接口，可以将 Anime Vault 中的番剧和剧集接入 Animeko；[Animeko](https://github.com/open-ani/animeko) 负责弹幕等更完整的观看体验。Anime Vault本身具有基本的播放能力，因此即使不是 Animeko 用户，也可以单独使用它管理和观看番剧。
 
-
 [docs/运行教程文档.md](docs/运行教程文档.md)：启动、访问、页面使用和常见问题。
-
 
 ## 推荐使用方式
 
@@ -28,7 +26,7 @@ Alist + Anime Vault + Animeko
 4. 在 Anime Vault 中补充海报、简介、演员等资料，形成统一的番剧海报墙。
 5. 在 Animeko 中添加 Anime Vault 的订阅配置，在 Animeko 中搜索并观看番剧，使用 Animeko 的弹幕功能。
 
-Anime Vault 也可以直接保存普通网站的播放入口并按规则生成剧集 URL，不依赖 Alist 或 Animeko。
+`Anime Vault` 也可以直接保存普通网站的播放入口并按规则生成剧集 URL，不依赖 Alist 或 Animeko。
 
 > 说明：项目只负责番剧资料展示、播放地址保存、URL 拼接、播放列表导入和浏览器/播放器跳转，不提供任何视频网站破解、解析或绕过权限的功能。请确保自己有权访问和使用导入的媒体资源。
 
