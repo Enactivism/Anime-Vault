@@ -328,6 +328,25 @@ textarea {
   gap: 14px;
 }
 
+.backup-panel {
+  border: 2px solid rgba(142, 232, 209, 0.45);
+  border-radius: var(--radius-md);
+  background: rgba(255,255,255,.72);
+}
+.backup-panel summary { display:flex; justify-content:space-between; padding:14px 16px; cursor:pointer; list-style:none; color:#34706d; font-weight:900; }
+.backup-panel summary::-webkit-details-marker { display:none; }
+.backup-panel summary span { display:grid; gap:3px; }
+.backup-panel summary small { color:#23866f; font-size:.7rem; letter-spacing:.12em; text-transform:uppercase; }
+.backup-panel__body { display:grid; gap:10px; padding:0 16px 16px; }
+.backup-field { display:grid; gap:5px; color:#34706d; font-weight:800; font-size:.88rem; }
+.backup-field input { width:100%; min-height:40px; padding:8px 10px; border:2px solid var(--line); border-radius:10px; background:#fff; color:var(--ink); }
+.backup-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.backup-button { min-height:40px; padding:0 14px; border:0; border-radius:999px; background:linear-gradient(135deg,var(--mint),var(--sky)); color:#305064; font-weight:900; cursor:pointer; }
+.backup-button--secondary { background:linear-gradient(135deg,var(--lemon),var(--peach)); }
+.backup-message { min-height:1.4em; margin:0; color:var(--ink-soft); font-size:.88rem; }
+.backup-message[data-state="error"] { color:#c64b75; }
+.backup-message[data-state="success"] { color:#23866f; }
+
 .privacy-controls {
   display: flex;
   align-items: center;

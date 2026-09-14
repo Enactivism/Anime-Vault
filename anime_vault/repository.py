@@ -626,3 +626,145 @@ def save_episode_progress(
         )
         connection.commit()
     load_catalog.cache_clear()
+
+
+def export_user_data() -> dict[str, Any]:
+    """Build a portable backup payload without including the access password."""
+    with sqlite3.connect(DB_PATH) as connection:
+        connection.row_factory = sqlite3.Row
+        progress_rows = connection.execute(
+            """
+            SELECT slug, episode_number, position_seconds, duration_seconds,
+                   completed, updated_at
+            FROM episode_playback_progress
+            ORDER BY slug, episode_number
+            """
+        ).fetchall()
+        activity_rows = connection.execute(
+            "SELECT slug, qualified_played_at FROM anime_playback_activity"
+        ).fetchall()
+        media_rows = connection.execute(
+            "SELECT path FROM media_library_directory ORDER BY position, path"
+        ).fetchall()
+
+    return {
+        "format": "anime-vault-backup",
+        "version": 1,
+        "exported_at": time.time(),
+        "anime": load_catalog(),
+        "episode_progress": [dict(row) for row in progress_rows],
+        "playback_activity": [dict(row) for row in activity_rows],
+        "media_library_paths": [str(row[0]) for row in media_rows],
+    }
+
+
+def import_user_data(payload: dict[str, Any]) -> int:
+    """Replace local user data with a validated backup payload."""
+    if not isinstance(payload, dict) or payload.get("format") != "anime-vault-backup":
+        raise ValueError("备份文件格式不正确")
+    anime_records = payload.get("anime", [])
+    progress_records = payload.get("episode_progress", [])
+    activity_records = payload.get("playback_activity", [])
+    media_paths = payload.get("media_library_paths", [])
+    if not isinstance(anime_records, list) or not isinstance(progress_records, list):
+        raise ValueError("备份文件缺少有效的番剧或播放数据")
+    if not isinstance(activity_records, list) or not isinstance(media_paths, list):
+        raise ValueError("备份文件缺少有效的播放活动或媒体库数据")
+
+    def text(record: dict[str, Any], key: str, default: str = "") -> str:
+        value = record.get(key, default)
+        return str(value) if value is not None else default
+
+    normalized = []
+    seen_slugs: set[str] = set()
+    for record in anime_records:
+        if not isinstance(record, dict):
+            raise ValueError("备份中的番剧记录无效")
+        slug = text(record, "slug").strip()
+        title = text(record, "title").strip()
+        if not slug or not title or slug in seen_slugs:
+            raise ValueError("备份中的番剧标识无效或重复")
+        seen_slugs.add(slug)
+        normalized.append(
+            (
+                slug,
+                title,
+                text(record, "subtitle"),
+                text(record, "release_info"),
+                text(record, "studio"),
+                text(record, "synopsis"),
+                json.dumps(record.get("cast", []), ensure_ascii=False),
+                json.dumps(record.get("keywords", []), ensure_ascii=False),
+                text(record, "poster_path"),
+                text(record, "still_path"),
+                json.dumps(record.get("sources", []), ensure_ascii=False),
+                text(record, "playback_url"),
+                text(record, "playback_mode", "online"),
+                text(record, "local_media_dir"),
+                max(0, int(record.get("episode_count", 0) or 0)),
+                text(record, "episode_root_domain"),
+                text(record, "episode_route"),
+                text(record, "episode_query_prefix"),
+                int(record.get("episode_start_number", 1) or 1),
+                text(record, "episode_other"),
+                text(record, "resource_type", "link"),
+                text(record, "playlist_name"),
+                json.dumps(record.get("playlist_episodes", []), ensure_ascii=False),
+                max(0, int(record.get("playlist_episode_offset", 0) or 0)),
+                max(0, int(record.get("last_played_episode", 0) or 0)),
+            )
+        )
+
+    with sqlite3.connect(DB_PATH) as connection:
+        connection.execute("BEGIN")
+        connection.execute("DELETE FROM episode_playback_progress")
+        connection.execute("DELETE FROM anime_playback_activity")
+        connection.execute("DELETE FROM anime")
+        connection.execute(
+            """
+            INSERT INTO anime (
+                slug, title, subtitle, release_info, studio, synopsis,
+                cast_json, keywords_json, poster_path, still_path, sources_json,
+                playback_url, playback_mode, local_media_dir, episode_count,
+                episode_root_domain, episode_route, episode_query_prefix,
+                episode_start_number, episode_other, resource_type, playlist_name,
+                playlist_episodes_json, playlist_episode_offset, last_played_episode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            normalized,
+        )
+        connection.executemany(
+            """
+            INSERT INTO episode_playback_progress
+              (slug, episode_number, position_seconds, duration_seconds, completed, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    text(record, "slug"),
+                    int(record.get("episode_number", 0) or 0),
+                    max(0.0, float(record.get("position_seconds", 0) or 0)),
+                    max(0.0, float(record.get("duration_seconds", 0) or 0)),
+                    1 if record.get("completed") else 0,
+                    float(record.get("updated_at", time.time()) or time.time()),
+                )
+                for record in progress_records
+                if isinstance(record, dict) and int(record.get("episode_number", 0) or 0) > 0
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO anime_playback_activity (slug, qualified_played_at) VALUES (?, ?)",
+            [
+                (text(record, "slug"), float(record.get("qualified_played_at", 0) or 0))
+                for record in activity_records
+                if isinstance(record, dict) and text(record, "slug") in seen_slugs
+            ],
+        )
+        connection.execute("DELETE FROM media_library_directory")
+        connection.executemany(
+            "INSERT INTO media_library_directory (path, position) VALUES (?, ?)",
+            [(str(path), position) for position, path in enumerate(media_paths) if str(path).strip()],
+        )
+        connection.commit()
+    load_catalog.cache_clear()
+    return len(normalized)

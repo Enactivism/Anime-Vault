@@ -43,6 +43,8 @@ from .repository import (
     delete_anime,
     get_anime,
     load_catalog,
+    export_user_data,
+    import_user_data,
     load_playback_activity,
     record_playback_activity,
     record_last_played_episode,
@@ -90,6 +92,9 @@ class AnimeRequestHandler(SimpleHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.handle_authentication_gate():
             return
+        if unquote(urlparse(self.path).path) == "/api/backup/export":
+            self.export_backup()
+            return
         if self.handle_dynamic_route(include_body=True):
             return
         super().do_GET()
@@ -114,6 +119,9 @@ class AnimeRequestHandler(SimpleHTTPRequestHandler):
             self.logout_site()
             return
         if self.handle_authentication_gate():
+            return
+        if route == "/api/backup/import":
+            self.import_backup()
             return
         if route == "/anime/create":
             self.create_anime_entry()
@@ -575,12 +583,24 @@ class AnimeRequestHandler(SimpleHTTPRequestHandler):
             {'<form method="post" action="/auth/logout"><button class="privacy-lock" type="submit">锁定</button></form>' if password_configured else ''}
           </div>
         '''
+        backup_controls = '''
+          <details class="backup-panel">
+            <summary><span><small>Cloud Backup</small><strong>备份服务器</strong></span><b>配置</b></summary>
+            <div class="backup-panel__body">
+              <label class="backup-field"><span>服务器 API 地址</span><input id="backupServerUrl" type="text" placeholder="192.168.1.20:8787/api/backup" autocomplete="url"></label>
+              <label class="backup-field"><span>访问令牌</span><input id="backupServerToken" type="password" placeholder="Bearer token" autocomplete="off"></label>
+              <div class="backup-actions"><button class="backup-button" type="button" data-backup-upload>上传备份</button><button class="backup-button backup-button--secondary" type="button" data-backup-refresh>一键刷新数据</button></div>
+              <p class="backup-message" data-backup-message role="status"></p>
+            </div>
+          </details>
+        '''
         page = render_template(
             "index.html",
             {
                 "TOTAL_COUNT": str(len(catalog)),
                 "POSTER_CARDS": cards,
                 "PRIVACY_CONTROLS": privacy_controls,
+                "BACKUP_CONTROLS": backup_controls,
                 "ANIMEKO_SUBSCRIPTION_URL": html.escape(
                     self.animeko_subscription_url(), quote=True
                 ),
@@ -979,6 +999,23 @@ class AnimeRequestHandler(SimpleHTTPRequestHandler):
         self.send_response(HTTPStatus.NO_CONTENT)
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
+
+    def export_backup(self) -> None:
+        self.respond_json(export_user_data())
+
+    def import_backup(self) -> None:
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.startswith("application/json"):
+            self.respond_json({"error": "请使用 application/json 提交备份"}, HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            content_length = int(self.headers.get("Content-Length", "0") or 0)
+            payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+            count = import_user_data(payload)
+        except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            self.respond_json({"error": str(exc) or "备份数据无效"}, HTTPStatus.BAD_REQUEST)
+            return
+        self.respond_json({"ok": True, "anime_count": count})
 
     def play_online_entry(self, slug: str) -> None:
         anime = get_anime(slug)

@@ -3,6 +3,62 @@ const posterGrid = document.getElementById("posterGrid");
 const visibleCount = document.getElementById("visibleCount");
 const emptyState = document.getElementById("emptyState");
 
+const backupServerUrl = document.getElementById("backupServerUrl");
+const backupServerToken = document.getElementById("backupServerToken");
+const backupMessage = document.querySelector("[data-backup-message]");
+const backupUpload = document.querySelector("[data-backup-upload]");
+const backupRefresh = document.querySelector("[data-backup-refresh]");
+
+if (backupServerUrl instanceof HTMLInputElement && backupServerToken instanceof HTMLInputElement) {
+  backupServerUrl.value = localStorage.getItem("anime-vault-backup-url") || "";
+  backupServerToken.value = localStorage.getItem("anime-vault-backup-token") || "";
+  const normalizeBackupUrl = (value) => {
+    const trimmed = value.trim().replace(/\/$/, "");
+    return trimmed && !/^https?:\/\//i.test(trimmed) ? `http://${trimmed}` : trimmed;
+  };
+  const saveBackupSettings = () => {
+    const normalized = normalizeBackupUrl(backupServerUrl.value);
+    backupServerUrl.value = normalized;
+    localStorage.setItem("anime-vault-backup-url", normalized);
+    localStorage.setItem("anime-vault-backup-token", backupServerToken.value.trim());
+  };
+  backupServerUrl.addEventListener("change", saveBackupSettings);
+  backupServerToken.addEventListener("change", saveBackupSettings);
+
+  const setBackupMessage = (message, error = false) => {
+    if (backupMessage instanceof HTMLElement) {
+      backupMessage.textContent = message;
+      backupMessage.dataset.state = error ? "error" : "success";
+    }
+  };
+  const backupRequest = async (method) => {
+    saveBackupSettings();
+    const url = normalizeBackupUrl(backupServerUrl.value);
+    const token = backupServerToken.value.trim();
+    if (!url || !token) throw new Error("请先填写备份服务器地址和访问令牌");
+    const headers = { Authorization: `Bearer ${token}` };
+    if (method === "PUT") {
+      const local = await fetch("/api/backup/export", { cache: "no-store" });
+      if (!local.ok) throw new Error("读取本地数据失败");
+      headers["Content-Type"] = "application/json";
+      const remote = await fetch(url, { method, headers, body: await local.text() });
+      if (!remote.ok) throw new Error((await remote.json().catch(() => ({}))).error || "上传备份失败");
+      return "备份已上传到服务器";
+    }
+    const remote = await fetch(url, { headers, cache: "no-store" });
+    if (!remote.ok) throw new Error((await remote.json().catch(() => ({}))).error || "下载备份失败");
+    const local = await fetch("/api/backup/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: await remote.text() });
+    if (!local.ok) throw new Error((await local.json().catch(() => ({}))).error || "写入本地数据失败");
+    return "数据已刷新，页面即将重新加载";
+  };
+  backupUpload?.addEventListener("click", async () => {
+    try { setBackupMessage("正在上传..."); setBackupMessage(await backupRequest("PUT")); } catch (error) { setBackupMessage(error.message, true); }
+  });
+  backupRefresh?.addEventListener("click", async () => {
+    try { setBackupMessage("正在刷新..."); setBackupMessage(await backupRequest("GET")); window.setTimeout(() => window.location.reload(), 500); } catch (error) { setBackupMessage(error.message, true); }
+  });
+}
+
 document.querySelectorAll("[data-copy-subscription]").forEach((button) => {
   if (!(button instanceof HTMLButtonElement)) {
     return;
