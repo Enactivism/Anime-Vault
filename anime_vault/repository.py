@@ -720,7 +720,7 @@ def import_user_data(payload: dict[str, Any]) -> int:
         connection.execute("DELETE FROM episode_playback_progress")
         connection.execute("DELETE FROM anime_playback_activity")
         connection.execute("DELETE FROM anime")
-        connection.execute(
+        connection.executemany(
             """
             INSERT INTO anime (
                 slug, title, subtitle, release_info, studio, synopsis,

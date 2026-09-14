@@ -9,6 +9,7 @@ from email.parser import BytesParser
 import os
 import re
 import time
+import traceback
 from http import HTTPStatus
 from http.cookies import CookieError, SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -400,6 +401,7 @@ class AnimeRequestHandler(SimpleHTTPRequestHandler):
         if route in {
             "/static/styles.css",
             "/static/app.js",
+            "/static/backup-client.js",
             "/auth",
             "/auth/setup",
         }:
@@ -585,12 +587,12 @@ class AnimeRequestHandler(SimpleHTTPRequestHandler):
         '''
         backup_controls = '''
           <details class="backup-panel">
-            <summary><span><small>Cloud Backup</small><strong>备份服务器</strong></span><b>配置</b></summary>
+            <summary><span><small>Cloud Backup</small><strong>备份服务器</strong></span><b class="backup-state" data-backup-state data-state="idle">未测试</b></summary>
             <div class="backup-panel__body">
               <label class="backup-field"><span>服务器 API 地址</span><input id="backupServerUrl" type="text" placeholder="192.168.1.20:8787/api/backup" autocomplete="url"></label>
               <label class="backup-field"><span>访问令牌</span><input id="backupServerToken" type="password" placeholder="Bearer token" autocomplete="off"></label>
-              <div class="backup-actions"><button class="backup-button" type="button" data-backup-upload>上传备份</button><button class="backup-button backup-button--secondary" type="button" data-backup-refresh>一键刷新数据</button></div>
-              <p class="backup-message" data-backup-message role="status"></p>
+              <div class="backup-actions"><button class="backup-button" type="button" data-backup-test>测试连接</button><button class="backup-button" type="button" data-backup-upload>上传备份</button><button class="backup-button backup-button--secondary" type="button" data-backup-refresh>一键刷新数据</button></div>
+              <p class="backup-message" data-backup-message role="status" aria-live="polite" data-state="info">填写地址和令牌后点击“测试连接”，确认能连上备份服务器再上传或刷新。</p>
             </div>
           </details>
         '''
@@ -1001,7 +1003,15 @@ class AnimeRequestHandler(SimpleHTTPRequestHandler):
         self.end_headers()
 
     def export_backup(self) -> None:
-        self.respond_json(export_user_data())
+        try:
+            payload = export_user_data()
+        except Exception as exc:  # 兜底：返回可读错误，避免前端只看到连接中断
+            traceback.print_exc()
+            self.respond_json(
+                {"error": f"读取本地数据失败：{exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR
+            )
+            return
+        self.respond_json(payload)
 
     def import_backup(self) -> None:
         content_type = self.headers.get("Content-Type", "")
@@ -1014,6 +1024,12 @@ class AnimeRequestHandler(SimpleHTTPRequestHandler):
             count = import_user_data(payload)
         except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             self.respond_json({"error": str(exc) or "备份数据无效"}, HTTPStatus.BAD_REQUEST)
+            return
+        except Exception as exc:  # 兜底：返回可读错误，避免前端只看到连接中断
+            traceback.print_exc()
+            self.respond_json(
+                {"error": f"写入本地数据失败：{exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR
+            )
             return
         self.respond_json({"ok": True, "anime_count": count})
 

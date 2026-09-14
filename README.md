@@ -106,8 +106,11 @@ Anime/
 ├── Stills/
 ├── static/
 │   ├── app.js
+│   ├── backup-client.js
 │   └── styles.css
 ├── tests/
+│   ├── backup_client.test.mjs
+│   ├── test_backup_connection.py
 │   ├── test_m3u8_create.py
 │   ├── test_playlists.py
 │   └── test_privacy.py
@@ -129,7 +132,8 @@ Anime/
 - `anime_vault/renderers.py`：加载模板、渲染 HTML 片段、生成剧集 URL 和播放列表剧集编号。
 - `anime_vault/playlists.py`：校验并解析用户上传的 M3U8 播放列表，生成 URL 列表对应的 M3U8 内容。
 - `anime_vault/seed.py`：内置初始番剧资料。
-- `static/app.js`：首页搜索、播放地址编辑、资源类型切换、剧集配置展开、图片和 M3U8 上传预览。
+- `static/app.js`：首页搜索、播放地址编辑、资源类型切换、剧集配置展开、图片和 M3U8 上传预览，以及备份服务器面板的状态和按钮行为。
+- `static/backup-client.js`：备份服务器地址解析、连通性与令牌检测、超时控制、上传和刷新请求，以及失败原因的中文提示。不操作 DOM，可单独测试。
 - `static/styles.css`：全站视觉样式和响应式布局。
 - `templates/auth.html`：设置密码、修改密码和输入密码解锁的认证页面。
 
@@ -176,6 +180,22 @@ python3 app.py --init-db
 该命令会创建 `data/anime.db`、创建或迁移 `anime` 表和隐私配置表，并写入或更新内置种子资料。
 
 首次启动时，项目会自动创建 `data/` 目录和数据库。之后再次启动会继续使用同一个数据库。
+
+## 运行测试
+
+后端和接口测试使用 Python 标准库的 `unittest`（可用 `pytest` 运行）：
+
+```bash
+python3 -m pytest tests -q
+```
+
+备份服务器连接判定的测试需要 Node.js：
+
+```bash
+node --test tests/backup_client.test.mjs
+```
+
+测试会在临时数据库中运行，不会修改 `data/anime.db`。
 
 ## 首页和详情页
 
@@ -359,6 +379,16 @@ data/anime.db
 启动时会自动执行数据库初始化和字段补齐。内置种子数据会更新基础资料字段，但不会覆盖用户保存的播放地址、剧集配置和播放记录。
 
 最重要的备份文件是 `data/anime.db`。如果新增或上传了图片，还需要备份 `poster/` 和 `Stills/`。迁移项目时必须连同数据库一起保留，否则播放数据和密码配置也会丢失。
+
+### 云端备份服务
+
+云端备份服务是上一级目录中的独立工程 `../anime-vault-backup-server/`，需要单独部署到远程云服务器。它通过 `Authorization: Bearer <令牌>` 接收和提供 JSON 备份，不连接本项目的 SQLite 数据库。部署和 API 说明见该工程的 README；完整的前端操作步骤见 [docs/运行教程文档.md](docs/运行教程文档.md) 的“使用独立云端备份服务”一节。
+
+Anime Vault 首页的“备份服务器”面板支持填写服务器 API 地址和访问令牌。地址应填写到 `/api/backup`，例如 `https://backup.example.com/api/backup`；填写局域网 IP 和端口时可以省略 `http://` 和 `/api/backup`，页面会自动补全。点击“测试连接”可以先确认连通性和令牌是否有效，再点击“上传备份”保存当前版本，或点击“一键刷新数据”下载云端版本并覆盖本地馆藏。
+
+面板标题右侧会一直显示连接状态（`未测试` / `检测中` / `已连接` / `已连接（暂无备份）` / `令牌无效` / `无法连接` / `路径有误` 等），收起面板时也能看到；打开首页会自动检测一次。检测和传输都有超时时间，失败时会给出具体原因，不会一直停在“进行中”。
+
+云端 JSON 包含番剧资料、剧集配置、M3U8 分集、播放记录、播放进度和媒体库路径，不包含访问密码、海报文件和剧照文件。图片目录仍需单独备份。刷新操作不可合并且不可撤销，使用前请确认云端备份是需要恢复的版本。
 
 ## 隐私保护
 

@@ -333,7 +333,7 @@ textarea {
   border-radius: var(--radius-md);
   background: rgba(255,255,255,.72);
 }
-.backup-panel summary { display:flex; justify-content:space-between; padding:14px 16px; cursor:pointer; list-style:none; color:#34706d; font-weight:900; }
+.backup-panel summary { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:14px 16px; cursor:pointer; list-style:none; color:#34706d; font-weight:900; }
 .backup-panel summary::-webkit-details-marker { display:none; }
 .backup-panel summary span { display:grid; gap:3px; }
 .backup-panel summary small { color:#23866f; font-size:.7rem; letter-spacing:.12em; text-transform:uppercase; }
@@ -343,9 +343,18 @@ textarea {
 .backup-actions { display:flex; gap:8px; flex-wrap:wrap; }
 .backup-button { min-height:40px; padding:0 14px; border:0; border-radius:999px; background:linear-gradient(135deg,var(--mint),var(--sky)); color:#305064; font-weight:900; cursor:pointer; }
 .backup-button--secondary { background:linear-gradient(135deg,var(--lemon),var(--peach)); }
-.backup-message { min-height:1.4em; margin:0; color:var(--ink-soft); font-size:.88rem; }
+.backup-button[disabled] { opacity:.55; cursor:progress; }
+.backup-message { min-height:1.4em; margin:0; color:var(--ink-soft); font-size:.88rem; line-height:1.5; }
 .backup-message[data-state="error"] { color:#c64b75; }
+.backup-message[data-state="warning"] { color:#a2622a; }
 .backup-message[data-state="success"] { color:#23866f; }
+.backup-message[data-state="pending"] { color:#34706d; }
+.backup-state { flex:none; padding:3px 10px; border-radius:999px; font-size:.72rem; font-weight:900; letter-spacing:.03em; white-space:nowrap; background:#eef2f4; color:#5b7076; }
+.backup-state[data-state="checking"] { background:#fdf1d4; color:#8a6d1f; }
+.backup-state[data-state="ok"] { background:#d7f2e5; color:#1c7a5e; }
+.backup-state[data-state="empty"] { background:#e2f0fb; color:#2b6a95; }
+.backup-state[data-state="warn"] { background:#ffe9d5; color:#a2622a; }
+.backup-state[data-state="error"] { background:#ffe1e9; color:#b93b64; }
 
 .privacy-controls {
   display: flex;

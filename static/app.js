@@ -6,57 +6,224 @@ const emptyState = document.getElementById("emptyState");
 const backupServerUrl = document.getElementById("backupServerUrl");
 const backupServerToken = document.getElementById("backupServerToken");
 const backupMessage = document.querySelector("[data-backup-message]");
+const backupStateNodes = document.querySelectorAll("[data-backup-state]");
+const backupTest = document.querySelector("[data-backup-test]");
 const backupUpload = document.querySelector("[data-backup-upload]");
 const backupRefresh = document.querySelector("[data-backup-refresh]");
 
-if (backupServerUrl instanceof HTMLInputElement && backupServerToken instanceof HTMLInputElement) {
-  backupServerUrl.value = localStorage.getItem("anime-vault-backup-url") || "";
-  backupServerToken.value = localStorage.getItem("anime-vault-backup-token") || "";
-  const normalizeBackupUrl = (value) => {
-    const trimmed = value.trim().replace(/\/$/, "");
-    return trimmed && !/^https?:\/\//i.test(trimmed) ? `http://${trimmed}` : trimmed;
-  };
-  const saveBackupSettings = () => {
-    const normalized = normalizeBackupUrl(backupServerUrl.value);
-    backupServerUrl.value = normalized;
-    localStorage.setItem("anime-vault-backup-url", normalized);
-    localStorage.setItem("anime-vault-backup-token", backupServerToken.value.trim());
-  };
-  backupServerUrl.addEventListener("change", saveBackupSettings);
-  backupServerToken.addEventListener("change", saveBackupSettings);
+/* 备份逻辑放在 backup-client.js。正常情况下 index.html 已经用 defer 先加载它；
+ * 这里再兜底一次，避免页面 HTML 是旧版本（没有 script 标签）时整个面板失去响应。 */
+const loadBackupClient = () =>
+  window.AnimeVaultBackup
+    ? Promise.resolve(window.AnimeVaultBackup)
+    : new Promise((resolve) => {
+        const script = document.createElement("script");
+        script.src = "/static/backup-client.js";
+        script.addEventListener("load", () => resolve(window.AnimeVaultBackup || null), { once: true });
+        script.addEventListener("error", () => resolve(null), { once: true });
+        document.head.appendChild(script);
+      });
 
-  const setBackupMessage = (message, error = false) => {
+if (backupServerUrl instanceof HTMLInputElement && backupServerToken instanceof HTMLInputElement) {
+  void loadBackupClient().then((backupApi) => {
+    if (!backupApi) {
+      setBackupMessageForMissingClient();
+      return;
+    }
+    setUpBackupPanel(backupApi);
+  });
+}
+
+const setBackupMessageForMissingClient = () => {
+  if (backupMessage instanceof HTMLElement) {
+    backupMessage.textContent =
+      "备份脚本 /static/backup-client.js 加载失败，请刷新页面；如果仍然失败，请重启 python3 app.py。";
+    backupMessage.dataset.state = "error";
+  }
+};
+
+function setUpBackupPanel(backupApi) {
+  const BACKUP_URL_KEY = "anime-vault-backup-url";
+  const BACKUP_TOKEN_KEY = "anime-vault-backup-token";
+  const SAVE_DEBOUNCE_MS = 400;
+  const RELOAD_DELAY_MS = 1500;
+
+  const backupButtons = [backupTest, backupUpload, backupRefresh].filter(
+    (button) => button instanceof HTMLButtonElement
+  );
+  backupButtons.forEach((button) => {
+    button.dataset.label = button.textContent;
+  });
+
+  let saveTimer = null;
+  let checkSequence = 0;
+
+  backupServerUrl.value = localStorage.getItem(BACKUP_URL_KEY) || "";
+  backupServerToken.value = localStorage.getItem(BACKUP_TOKEN_KEY) || "";
+
+  const readBackupConfig = () => ({
+    url: backupServerUrl.value.trim(),
+    token: backupServerToken.value.trim(),
+    pageProtocol: window.location.protocol,
+  });
+
+  const saveBackupConfig = () => {
+    localStorage.setItem(BACKUP_URL_KEY, backupServerUrl.value.trim());
+    localStorage.setItem(BACKUP_TOKEN_KEY, backupServerToken.value.trim());
+  };
+
+  const scheduleBackupSave = () => {
+    if (saveTimer !== null) {
+      window.clearTimeout(saveTimer);
+    }
+    saveTimer = window.setTimeout(() => {
+      saveTimer = null;
+      saveBackupConfig();
+    }, SAVE_DEBOUNCE_MS);
+  };
+
+  /* 徽标同时出现在面板标题和面板内部，收起时也能看到连接状态。 */
+  const setBackupState = (status) => {
+    const text = backupApi.badgeText(status);
+    const level = backupApi.badgeLevel(status);
+    backupStateNodes.forEach((node) => {
+      if (node instanceof HTMLElement) {
+        node.textContent = text;
+        node.dataset.state = level;
+      }
+    });
+  };
+
+  const setBackupMessage = (message, state = "info") => {
     if (backupMessage instanceof HTMLElement) {
       backupMessage.textContent = message;
-      backupMessage.dataset.state = error ? "error" : "success";
+      backupMessage.dataset.state = state;
     }
   };
-  const backupRequest = async (method) => {
-    saveBackupSettings();
-    const url = normalizeBackupUrl(backupServerUrl.value);
-    const token = backupServerToken.value.trim();
-    if (!url || !token) throw new Error("请先填写备份服务器地址和访问令牌");
-    const headers = { Authorization: `Bearer ${token}` };
-    if (method === "PUT") {
-      const local = await fetch("/api/backup/export", { cache: "no-store" });
-      if (!local.ok) throw new Error("读取本地数据失败");
-      headers["Content-Type"] = "application/json";
-      const remote = await fetch(url, { method, headers, body: await local.text() });
-      if (!remote.ok) throw new Error((await remote.json().catch(() => ({}))).error || "上传备份失败");
-      return "备份已上传到服务器";
-    }
-    const remote = await fetch(url, { headers, cache: "no-store" });
-    if (!remote.ok) throw new Error((await remote.json().catch(() => ({}))).error || "下载备份失败");
-    const local = await fetch("/api/backup/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: await remote.text() });
-    if (!local.ok) throw new Error((await local.json().catch(() => ({}))).error || "写入本地数据失败");
-    return "数据已刷新，页面即将重新加载";
+
+  const setBackupBusy = (activeButton, busyLabel) => {
+    backupButtons.forEach((button) => {
+      button.disabled = Boolean(activeButton);
+      button.textContent = button === activeButton ? busyLabel : button.dataset.label;
+    });
   };
+
+  /* 把操作失败的 reason 映射成徽标状态和提示语气。 */
+  const describeBackupFailure = (error) => {
+    const reason = error && error.reason;
+    if (reason === "empty-url") return { status: "idle", state: "warning", hint: false };
+    if (reason === "invalid-url" || reason === "invalidUrl") return { status: "invalidUrl", state: "warning", hint: false };
+    if (reason === "config") return { status: "noToken", state: "warning", hint: false };
+    if (reason === "blocked") return { status: "blocked", state: "error", hint: false };
+    if (reason === "timeout") return { status: "timeout", state: "error", hint: true };
+    if (reason === "network") return { status: "unreachable", state: "error", hint: true };
+    if (reason === "empty") return { status: "empty", state: "warning", hint: false };
+    if (reason === "local") return { status: null, state: "error", hint: false };
+    if (reason === "remote") {
+      const unauthorized = error.status === 401 || error.status === 403;
+      return { status: unauthorized ? "unauthorized" : "serverError", state: "error", hint: !unauthorized };
+    }
+    return { status: "failed", state: "error", hint: true };
+  };
+
+  const reportBackupFailure = (error) => {
+    const outcome = describeBackupFailure(error);
+    const message = error && error.message ? error.message : "操作失败，请重试。";
+    if (outcome.status) {
+      setBackupState(outcome.status);
+    }
+    setBackupMessage(outcome.hint ? `${message} 也可以点击“测试连接”查看详细原因。` : message, outcome.state);
+  };
+
+  /* 检查连接：以带令牌访问 /api/backup 的真实结果为准。 */
+  const runBackupCheck = async () => {
+    const config = readBackupConfig();
+    if (!config.url || !config.token) {
+      setBackupState("idle");
+      setBackupMessage("请先填写备份服务器地址和访问令牌，然后点击“测试连接”。", "warning");
+      return null;
+    }
+    const sequence = ++checkSequence;
+    setBackupState("checking");
+    setBackupMessage("正在检查与备份服务器的连接…", "pending");
+    const result = await backupApi.checkConnection(config);
+    if (sequence !== checkSequence) {
+      return null; /* 已经有更新的检查在进行，丢弃过期结果 */
+    }
+    setBackupState(result.status);
+    const detail = result.detail && result.detail !== result.message ? `（${result.detail}）` : "";
+    const state = result.ok ? "success" : result.level === "error" ? "error" : "warning";
+    setBackupMessage(`${result.message}${detail}`, state);
+    return result;
+  };
+
+  backupServerUrl.addEventListener("input", scheduleBackupSave);
+  backupServerToken.addEventListener("input", scheduleBackupSave);
+  backupServerUrl.addEventListener("change", () => {
+    saveBackupConfig();
+    void runBackupCheck();
+  });
+  backupServerToken.addEventListener("change", () => {
+    saveBackupConfig();
+    void runBackupCheck();
+  });
+
+  backupTest?.addEventListener("click", async () => {
+    saveBackupConfig();
+    setBackupBusy(backupTest, "检测中…");
+    try {
+      await runBackupCheck();
+    } catch (error) {
+      setBackupState("failed");
+      setBackupMessage(error && error.message ? `检测失败：${error.message}` : "检测失败，请重试。", "error");
+    } finally {
+      setBackupBusy(null);
+    }
+  });
+
   backupUpload?.addEventListener("click", async () => {
-    try { setBackupMessage("正在上传..."); setBackupMessage(await backupRequest("PUT")); } catch (error) { setBackupMessage(error.message, true); }
+    saveBackupConfig();
+    setBackupBusy(backupUpload, "上传中…");
+    setBackupState("checking");
+    setBackupMessage("正在读取本地数据并上传到备份服务器…", "pending");
+    try {
+      const result = await backupApi.uploadBackup(readBackupConfig());
+      setBackupState("ok");
+      setBackupMessage(result.message, "success");
+    } catch (error) {
+      reportBackupFailure(error);
+    } finally {
+      setBackupBusy(null);
+    }
   });
+
   backupRefresh?.addEventListener("click", async () => {
-    try { setBackupMessage("正在刷新..."); setBackupMessage(await backupRequest("GET")); window.setTimeout(() => window.location.reload(), 500); } catch (error) { setBackupMessage(error.message, true); }
+    saveBackupConfig();
+    setBackupBusy(backupRefresh, "刷新中…");
+    setBackupState("checking");
+    setBackupMessage("正在从备份服务器下载数据并覆盖本地馆藏…", "pending");
+    let reloading = false;
+    try {
+      const result = await backupApi.refreshFromBackup(readBackupConfig());
+      setBackupState("ok");
+      setBackupMessage(`${result.message} 页面即将重新加载…`, "success");
+      reloading = true;
+      window.setTimeout(() => window.location.reload(), RELOAD_DELAY_MS);
+    } catch (error) {
+      reportBackupFailure(error);
+    } finally {
+      if (!reloading) {
+        setBackupBusy(null);
+      }
+    }
   });
+
+  /* 打开首页时自动检查一次，让连接状态无需手动操作即可见。 */
+  if (backupServerUrl.value.trim() && backupServerToken.value.trim()) {
+    void runBackupCheck();
+  } else {
+    setBackupState("idle");
+  }
 }
 
 document.querySelectorAll("[data-copy-subscription]").forEach((button) => {
