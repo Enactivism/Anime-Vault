@@ -207,6 +207,11 @@ class AnimeRequestHandler(SimpleHTTPRequestHandler):
                 if slug:
                     self.play_online_entry(slug)
                     return True
+            if inner_route.endswith("/download-m3u8"):
+                slug = inner_route.removesuffix("/download-m3u8").strip("/")
+                if slug:
+                    self.download_m3u8(slug, include_body=include_body)
+                    return True
             if "/episode/" in inner_route and include_body:
                 slug, episode_raw = inner_route.split("/episode/", 1)
                 if slug and episode_raw.isdigit():
@@ -1271,6 +1276,98 @@ class AnimeRequestHandler(SimpleHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "audio/x-mpegurl; charset=utf-8")
         self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if include_body:
+            self.wfile.write(payload)
+
+    def download_m3u8(self, slug: str, include_body: bool = True) -> None:
+        """Generate and return an M3U8 playlist for the given anime entry.
+        Supports `playlist` resource_type and `local` playback_mode. Other types
+        will return a 400 response.
+        """
+        anime = self.get_catalog_entry(slug)
+        if anime is None:
+            self.send_error(HTTPStatus.NOT_FOUND, "Anime not found")
+            return
+
+        # Playlist-based entries: reconstruct original m3u8 from stored episodes
+        if anime.get("resource_type") == "playlist":
+            episodes = list(anime.get("playlist_episodes", []))
+            if not episodes:
+                self.send_error(HTTPStatus.NOT_FOUND, "Playlist is empty")
+                return
+            lines = ["#EXTM3U"]
+            for ep in episodes:
+                title = str(ep.get("title", ""))
+                url = str(ep.get("url", ""))
+                lines.append(f"#EXTINF:-1,{title}")
+                lines.append(url)
+            payload = ("\n".join(lines) + "\n").encode("utf-8")
+            filename = str(
+                anime.get("playlist_name") or f"{self.slug_to_filename(slug)}.m3u8"
+            )
+            self.send_m3u8_payload(payload, filename, include_body=include_body)
+            return
+
+        # Local media entries: build a playlist pointing to local episode streaming endpoints
+        if anime.get("playback_mode") == "local":
+            local_dir = str(anime.get("local_media_dir", "") or "")
+            files = list_video_files(local_dir)
+            if not files:
+                self.send_error(HTTPStatus.NOT_FOUND, "No local episodes found")
+                return
+            base_url = f"http://{self.headers.get('Host', '127.0.0.1:8000')}"
+            lines = ["#EXTM3U"]
+            for idx in range(1, len(files) + 1):
+                title = f"{anime.get('title', slug)} - 第 {idx} 集"
+                media_url = f"{base_url}/anime/{quote(slug)}/local-episode/{idx}"
+                lines.append(f"#EXTINF:-1,{title}")
+                lines.append(media_url)
+            payload = ("\n".join(lines) + "\n").encode("utf-8")
+            filename = f"{self.slug_to_filename(slug)}.m3u8"
+            self.send_m3u8_payload(payload, filename, include_body=include_body)
+            return
+
+        # If the entry isn't playlist or local, there's no m3u8 to download
+        playback_url = str(anime.get("playback_url", "") or "").strip()
+        if playback_url and ".m3u8" in playback_url:
+            # Redirect to the upstream M3U8 URL so the browser can download it
+            self.redirect(playback_url, HTTPStatus.FOUND)
+            return
+
+        self.send_error(HTTPStatus.BAD_REQUEST, "M3U8 下载不可用：该番剧没有可导出的播放列表或本地媒体。")
+
+    def send_m3u8_payload(
+        self, payload: bytes, filename: str, include_body: bool = True
+    ) -> None:
+        """Send an M3U8 attachment with a safe UTF-8 filename.
+
+        ``send_header`` writes the header as latin-1. Putting a Chinese upload
+        filename directly into Content-Disposition therefore raises a
+        UnicodeEncodeError and leaves the browser with an empty response.
+        ``filename*`` carries the real UTF-8 name while the ASCII filename is
+        retained for older clients.
+        """
+        safe_filename = Path(filename).name.replace("\r", "_").replace("\n", "_")
+        if not safe_filename or safe_filename in {".", ".."}:
+            safe_filename = "download.m3u8"
+        if not safe_filename.lower().endswith(".m3u8"):
+            safe_filename = f"{safe_filename}.m3u8"
+
+        ascii_stem = Path(safe_filename).stem.encode("ascii", "ignore").decode("ascii")
+        ascii_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", ascii_stem).strip("._-")
+        ascii_filename = f"{ascii_stem or 'download'}.m3u8"
+        encoded_filename = quote(safe_filename, safe="!#$&+-.^_`|~")
+        content_disposition = (
+            f'attachment; filename="{ascii_filename}"; '
+            f"filename*=UTF-8''{encoded_filename}"
+        )
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "audio/x-mpegurl; charset=utf-8")
+        self.send_header("Content-Disposition", content_disposition)
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()

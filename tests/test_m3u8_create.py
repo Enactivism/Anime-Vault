@@ -125,6 +125,17 @@ class CreateM3U8AnimeTests(unittest.TestCase):
         self.assertIn(">第 4 集<", detail_page)
         self.assertIn("https://media.example.test/%E5%8A%A8%E6%BC%AB/%5B01%5D.mp4", detail_page)
 
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", self.server.server_address[1], timeout=5
+        )
+        connection.request("GET", "/anime/dr-stone-playlist-test")
+        response = connection.getresponse()
+        browser_detail_page = response.read().decode("utf-8")
+        connection.close()
+
+        self.assertEqual(response.status, 200)
+        self.assertIn("/anime/dr-stone-playlist-test/download-m3u8", browser_detail_page)
+
     def test_homepage_has_animeko_subscription_copy_url(self) -> None:
         with patch.dict(os.environ, {"ANIMEKO_API_TOKEN": "12345678"}):
             connection = http.client.HTTPConnection(
@@ -241,6 +252,66 @@ class CreateM3U8AnimeTests(unittest.TestCase):
         self.assertEqual(anime["title"], "我是大哥大")
         self.assertIn("%E6%A0%91%E8%8E%93%E6%B4%BE", anime["playlist_episodes"][0]["url"])
         self.assertIn("%E6%88%91%E6%98%AF%E5%A4%A7%E5%93%A5%E5%A4%A701.mp4", anime["playlist_episodes"][0]["url"])
+
+    def test_download_m3u8_supports_unicode_filename_and_head(self) -> None:
+        playlist = (
+            "#EXTM3U\n"
+            "#EXTINF:-1,石纪元 第01集\n"
+            "https://media.example.test/episode-01.mp4\n"
+        ).encode("utf-8")
+        payload, boundary = multipart_payload(
+            {
+                "slug": "unicode-download-test",
+                "title": "石纪元",
+                "resource_type": "playlist",
+                "playback_mode": "online",
+            },
+            "石纪元 第一季.m3u8",
+            playlist,
+        )
+
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", self.server.server_address[1], timeout=5
+        )
+        connection.request(
+            "POST",
+            "/anime/create",
+            body=payload,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        response = connection.getresponse()
+        response.read()
+        connection.close()
+        self.assertEqual(response.status, 303)
+
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", self.server.server_address[1], timeout=5
+        )
+        connection.request("GET", "/anime/unicode-download-test/download-m3u8")
+        response = connection.getresponse()
+        downloaded = response.read()
+        disposition = response.getheader("Content-Disposition", "")
+        connection.close()
+
+        self.assertEqual(response.status, 200)
+        self.assertIn("filename=\"download.m3u8\"", disposition)
+        self.assertIn("filename*=UTF-8''%E7%9F%B3%E7%BA%AA%E5%85%83%20%E7%AC%AC%E4%B8%80%E5%AD%A3.m3u8", disposition)
+        self.assertEqual(
+            downloaded.decode("utf-8"),
+            "#EXTM3U\n#EXTINF:-1,石纪元 第01集\n"
+            "https://media.example.test/episode-01.mp4\n",
+        )
+
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", self.server.server_address[1], timeout=5
+        )
+        connection.request("HEAD", "/anime/unicode-download-test/download-m3u8")
+        response = connection.getresponse()
+        head_body = response.read()
+        connection.close()
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(head_body, b"")
 
 
 if __name__ == "__main__":

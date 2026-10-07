@@ -166,13 +166,21 @@ def render_source_list(items: list[dict[str, str]]) -> str:
 def render_playback_section(anime: dict[str, Any]) -> str:
     if anime.get("playback_mode") == "local":
         local_dir = html.escape(str(anime.get("local_media_dir", "") or ""))
-        return f'<section class="playback-card playback-card--local"><p>本地媒体库：{local_dir}</p></section>'
+        slug = quote(str(anime["slug"]))
+        return (
+            '<section class="playback-card playback-card--local">'
+            f'<p>本地媒体库：{local_dir}</p>'
+            f'<p><a class="playback-download" href="/anime/{slug}/download-m3u8">下载 M3U8</a></p>'
+            '</section>'
+        )
     if anime.get("resource_type") == "playlist":
         playlist_name = html.escape(str(anime.get("playlist_name", "") or "M3U8 播放列表"))
         episode_count = len(anime.get("playlist_episodes", []))
+        slug = quote(str(anime["slug"]))
         return (
             '<section class="playback-card playback-card--playlist">'
             f'<p>资源：{playlist_name} · 已解析 {episode_count} 集</p>'
+            f'<p><a class="playback-download" href="/anime/{slug}/download-m3u8">下载 M3U8</a></p>'
             "</section>"
         )
     slug = quote(str(anime["slug"]))
