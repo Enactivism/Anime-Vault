@@ -1,10 +1,10 @@
 # Anime Vault
-```
-**[注意]** 本项目没有考虑代码的安全性，因此不建议将服务暴露到公网。
-```
-Anime Vault 是一个面向个人使用的本地番剧管理与观看网页。它把分散在不同网站、网盘或媒体平台的番剧入口整理成统一的海报墙，并为每部番剧保存基本资料、播放地址、剧集跳转规则和播放记录。
 
-项目现在支持独立云端备份服务。备份服务工程位于上一级目录的 `anime-vault-backup-server/`，与本项目分开部署；首页“备份服务器”面板可填写云端 API 地址和令牌，并上传或一键刷新番剧资料、剧集配置及播放记录。部署方式见该工程的 README。
+> **注意**：这是面向个人或局域网使用的工具，不是经过安全加固的公网生产服务。默认使用普通 HTTP，直接暴露到公网前请先配置 HTTPS、反向代理和额外认证。
+
+Anime Vault 是一个基于 Python 标准库的本地番剧管理与基础观看网页。它把来自网站、Alist、网盘或本地媒体库的番剧入口整理成海报墙，并保存番剧资料、剧集规则、M3U8 分集和播放状态。
+
+项目还支持一个**独立部署的云端 JSON 备份服务**。备份服务不在本仓库内，也不连接本项目的 SQLite；Anime Vault 首页的“备份服务器”面板可以测试连接、上传备份和覆盖式恢复备份。
 
 Anime Vault 项目提供了与 Animeko 配合使用的订阅配置和 Selector 数据源接口，可以将 Anime Vault 中的番剧和剧集接入 Animeko；[Animeko](https://github.com/open-ani/animeko) 负责弹幕等更完整的观看体验。Anime Vault本身具有基本的播放能力，因此即使不是 Animeko 用户，也可以单独使用它管理和观看番剧。
 
@@ -45,9 +45,11 @@ Alist + Anime Vault + Animeko
 - 上传 UTF-8 编码的 `.m3u8` 播放列表，自动生成剧集
 - 逐行粘贴 HTTP/HTTPS 视频 URL，自动生成 M3U8 和剧集
 - 为导入的播放列表设置剧集显示偏移
-- 在浏览器中进行基础播放，并记录播放进度和上一次播放集数
+- M3U8 和本地媒体的浏览器内播放、剧集切换与播放状态记录
+- 本地媒体库按目录扫描视频，支持生成单集 MPV 播放列表
 - 生成 Animeko 可读取的订阅配置和 Selector 数据源接口
 - Animeko API 支持在线路由、M3U8 分集以及本地媒体资源
+- 可选的独立云端 JSON 备份、连接检测和覆盖式恢复
 - 首页设置个人访问密码；无需注册账号和多用户权限系统
 - 启动时自动创建数据库并迁移缺失字段
 - 内置番剧种子资料会在初始化时写入或更新基础资料，不覆盖用户保存的播放地址、剧集配置和播放记录
@@ -81,7 +83,7 @@ Alist + Anime Vault + Animeko
 ## 目录结构
 
 ```text
-Anime/
+Anime-Vault/
 ├── app.py
 ├── README.md
 ├── anime_vault/
@@ -94,16 +96,12 @@ Anime/
 │   ├── repository.py
 │   ├── seed.py
 │   └── server.py
-├── data/
+├── data/                         # 运行后生成，已被 .gitignore 忽略
 │   └── anime.db
 ├── docs/
-│   ├── 代码复制移植说明书.md
-│   ├── 文件夹结构说明.md
-│   ├── 流程图.md
-│   ├── 资料来源.md
 │   └── 运行教程文档.md
-├── poster/
-├── Stills/
+├── poster/                       # 上传后生成，已被 .gitignore 忽略
+├── Stills/                       # 上传后生成，已被 .gitignore 忽略
 ├── static/
 │   ├── app.js
 │   ├── backup-client.js
@@ -126,9 +124,9 @@ Anime/
 - `app.py`：极薄启动入口，保留 `python3 app.py` 的运行方式。
 - `anime_vault/cli.py`：解析 `--host`、`--port`、`--init-db` 等命令行参数，初始化数据库并启动 HTTP 服务。
 - `anime_vault/config.py`：集中定义项目路径、数据库路径、模板路径、图片目录和媒体格式。
-- `anime_vault/media.py`：校验媒体目录、查找本地视频文件、确定视频 MIME 类型，并在需要时使用 `ffprobe` 检查视频流。
+- `anime_vault/media.py`：校验媒体目录是否位于允许的媒体库根目录内、递归查找视频文件、确定视频 MIME 类型，并提供可选的 `ffprobe` 视频流探测函数。
 - `anime_vault/server.py`：处理认证、路由、表单、上传、播放、重定向、Animeko 接口和静态文件服务。
-- `anime_vault/repository.py`：创建和迁移数据库表，读写番剧数据、播放进度和访问密码哈希。
+- `anime_vault/repository.py`：创建和迁移数据库表，读写番剧数据、播放进度、媒体库根目录、访问密码哈希以及备份 JSON。
 - `anime_vault/renderers.py`：加载模板、渲染 HTML 片段、生成剧集 URL 和播放列表剧集编号。
 - `anime_vault/playlists.py`：校验并解析用户上传的 M3U8 播放列表，生成 URL 列表对应的 M3U8 内容。
 - `anime_vault/seed.py`：内置初始番剧资料。
@@ -183,11 +181,13 @@ python3 app.py --init-db
 
 ## 运行测试
 
-后端和接口测试使用 Python 标准库的 `unittest`（可用 `pytest` 运行）：
+后端和接口测试使用 Python 标准库的 `unittest`，不需要安装第三方 Python 包：
 
 ```bash
-python3 -m pytest tests -q
+python3 -m unittest discover -s tests -v
 ```
+
+如本机已经安装 `pytest`，也可以运行 `python3 -m pytest tests -q`，但它不是项目的必要依赖。
 
 备份服务器连接判定的测试需要 Node.js：
 
@@ -196,6 +196,33 @@ node --test tests/backup_client.test.mjs
 ```
 
 测试会在临时数据库中运行，不会修改 `data/anime.db`。
+
+提交前可以额外执行：
+
+```bash
+python3 -m compileall -q anime_vault tests
+git diff --check
+```
+
+## 常用路由
+
+| 路由 | 方法 | 用途 |
+| --- | --- | --- |
+| `/` | GET | 首页海报墙 |
+| `/anime/new` | GET | 新增番剧表单 |
+| `/anime/<slug>` | GET | 番剧详情页 |
+| `/anime/<slug>/edit` | GET/POST | 编辑番剧 |
+| `/anime/<slug>/episode/<n>` | GET | 在线链接或 M3U8 分集播放 |
+| `/anime/<slug>/local-episode/<n>` | GET/HEAD | 本地媒体分集流式播放 |
+| `/anime/<slug>/mpv-playlist/<n>` | GET | 下载单集 MPV 播放列表 |
+| `/anime/<slug>/download-m3u8` | GET/HEAD | 导出或重定向到 M3U8 |
+| `/animeko/subscription` | GET | Animeko 订阅配置 |
+| `/animeko/search?keyword=...` | GET | Animeko 搜索接口 |
+| `/animeko/anime/<slug>` | GET | Animeko 番剧详情和分集 |
+| `/api/backup/export` | GET | 导出当前本地 JSON 备份 |
+| `/api/backup/import` | POST | 覆盖导入 JSON 备份 |
+
+`/api/backup/import` 要求 `Content-Type: application/json`。设置网页访问密码后，Animeko 路由需要令牌；网页端的本地备份接口仍由浏览器会话保护。
 
 ## 首页和详情页
 
@@ -262,6 +289,18 @@ JPG, JPEG, PNG, GIF, WEBP, BMP, SVG, AVIF
 
 两种导入方式都支持“导入集数显示偏移”。例如填写 `3` 后，播放列表的第一条视频仍通过内部第 1 条地址播放，但页面和 Animeko 中显示为“第 4 集”；URL 列表生成的 M3U8 标题也会同步使用偏移后的集数。播放地址和播放进度不会因此改变。
 
+### 本地媒体播放
+
+本地媒体不是新增页中的资源类型，而是在番剧详情页的“剧集 -> 配置”中选择“本地页内播放”。配置时填写本地番剧目录；该目录必须存在，并且必须位于数据库 `media_library_directory` 表配置的媒体库根目录下。
+
+新数据库默认允许的媒体库根目录是 `/mnt/alist`。当前项目没有单独的媒体库设置页面；如果媒体实际位于其他根目录，需要先修改数据库中的媒体库根目录配置，或通过备份 JSON 的 `media_library_paths` 导入配置。番剧目录下会递归扫描以下扩展名，并按相对路径排序生成剧集：
+
+```text
+.mp4 .m4v .webm .mkv .mov .avi .flv
+```
+
+本地模式提供详情页内播放器、上一集/下一集、音量、倍速、全屏和播放进度保存；也可以从当前集数生成单集 MPV 播放列表。视频不会被转码，浏览器是否能播放取决于视频编码和浏览器支持情况。
+
 ## 剧集 URL 规则
 
 对“播放链接 / 路由”资源，详情页的“剧集 -> 配置”会保存以下字段：
@@ -302,7 +341,7 @@ https://example.com/watch?ep=0&from=anime
 https://example.com/watch?ep=24&from=anime
 ```
 
-点击剧集后，项目会记录该集为“上一次播放”，并在剧集列表中高亮。浏览器本地播放还会保存播放位置、时长和完成状态。
+点击剧集后，项目会记录该集为“上一次播放”，并在剧集列表中高亮。在线链接模式只负责跳转到外部地址；M3U8 播放页的播放位置保存在当前浏览器的 `localStorage` 中；本地媒体模式还会将播放位置、时长和完成状态写入 SQLite。
 
 ## Animeko 接入
 
@@ -382,13 +421,37 @@ data/anime.db
 
 ### 云端备份服务
 
-云端备份服务是上一级目录中的独立工程 `../anime-vault-backup-server/`，需要单独部署到远程云服务器。它通过 `Authorization: Bearer <令牌>` 接收和提供 JSON 备份，不连接本项目的 SQLite 数据库。部署和 API 说明见该工程的 README；完整的前端操作步骤见 [docs/运行教程文档.md](docs/运行教程文档.md) 的“使用独立云端备份服务”一节。
+云端备份服务是与本项目分开部署的独立 Python 服务，不属于本仓库。它通过 `Authorization: Bearer <令牌>` 接收和提供 JSON 备份，不连接本项目的 SQLite 数据库。服务端源码应单独部署，并以持久化目录保存备份。
+
+备份服务的最小启动方式如下：
+
+```bash
+export BACKUP_TOKEN='请替换为随机生成的长字符串'
+python3 server.py --host 0.0.0.0 --port 8787 --data-dir /srv/anime-vault-backups
+```
+
+服务端参数：
+
+- `--host`：监听地址，默认 `0.0.0.0`。
+- `--port`：监听端口，默认 `8787`。
+- `--data-dir`：JSON 备份保存目录，默认 `./data`。
+- `--token`：访问令牌；也可以使用环境变量 `BACKUP_TOKEN`。
+
+接口约定：
+
+- `GET /health`：返回 `{"ok": true, "service": "anime-vault-backup"}`。
+- `GET /api/backup`：使用令牌下载最近一次备份；没有备份时返回 `404`。
+- `PUT /api/backup`：使用令牌上传 JSON；单个备份最大 20 MiB。
+
+生产环境建议将服务放在 Nginx 或 Caddy 后面启用 HTTPS，并确保反向代理保留 `/health` 和 `/api/backup` 路径。备份服务保存每个令牌最近的一份 JSON，不提供版本合并或历史版本管理。
 
 Anime Vault 首页的“备份服务器”面板支持填写服务器 API 地址和访问令牌。地址应填写到 `/api/backup`，例如 `https://backup.example.com/api/backup`；填写局域网 IP 和端口时可以省略 `http://` 和 `/api/backup`，页面会自动补全。点击“测试连接”可以先确认连通性和令牌是否有效，再点击“上传备份”保存当前版本，或点击“一键刷新数据”下载云端版本并覆盖本地馆藏。
 
 面板标题右侧会一直显示连接状态（`未测试` / `检测中` / `已连接` / `已连接（暂无备份）` / `令牌无效` / `无法连接` / `路径有误` 等），收起面板时也能看到；打开首页会自动检测一次。检测和传输都有超时时间，失败时会给出具体原因，不会一直停在“进行中”。
 
-云端 JSON 包含番剧资料、剧集配置、M3U8 分集、播放记录、播放进度和媒体库路径，不包含访问密码、海报文件和剧照文件。图片目录仍需单独备份。刷新操作不可合并且不可撤销，使用前请确认云端备份是需要恢复的版本。
+云端 JSON 包含番剧资料、播放地址、剧集配置、M3U8 分集、播放记录、播放进度和媒体库路径，不包含访问密码、会话密钥、海报文件和剧照文件。图片目录仍需单独备份。浏览器会把备份地址和令牌保存到当前浏览器的 `localStorage`，不会写入 Anime Vault 数据库。
+
+“一键刷新数据”是覆盖式恢复：会删除当前本地番剧、播放进度和播放活动，再写入云端版本，不能合并两个版本。执行前请确认云端备份时间和内容；如果误刷新，只能重新上传正确的本地备份。
 
 ## 隐私保护
 
