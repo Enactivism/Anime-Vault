@@ -197,6 +197,8 @@ node --test tests/backup_client.test.mjs
 
 测试会在临时数据库中运行，不会修改 `data/anime.db`。
 
+完整的测试范围、GitHub Actions job 和失败日志查看方式见 [docs/自动化测试.md](docs/自动化测试.md)。CI 会在 push、pull request 或手动触发时，于 Ubuntu 上运行 Python 3.10/3.14 和 Node.js 24 测试，并在失败时保留 7 天日志；实际运行结果以仓库的 Actions 页面为准。
+
 提交前可以额外执行：
 
 ```bash

@@ -1,0 +1,70 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    name: Python ${{ matrix.python-version }} tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run Python tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -v 2>&1 | tee "python-tests-${{ matrix.python-version }}.log"
+
+      - name: Upload Python test log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-tests-${{ matrix.python-version }}-log
+          path: python-tests-${{ matrix.python-version }}.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  node-tests:
+    name: Node.js 24 tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Run Node.js tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/*.test.mjs 2>&1 | tee node-tests.log
+
+      - name: Upload Node.js test log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: node-tests-24-log
+          path: node-tests.log
+          if-no-files-found: warn
+          retention-days: 7
